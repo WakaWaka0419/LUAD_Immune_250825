@@ -83,7 +83,7 @@ seu_Cancer_Cell_remake <- ComputeModuleScore(seu_Cancer_Cell_remake, gene.sets =
 DefaultAssay(seu_Cancer_Cell_remake) <- "AUCell"
 seu_Cancer_Cell_remake <- RunUMAP(object = seu_Cancer_Cell_remake,
                features = rownames(seu_Cancer_Cell_remake),
-               metric = "correlation", # 注意这里用correlation效果最好
+               metric = "correlation", 
                reduction.name = "umapRAS",
                reduction.key = "umapRAS_")
 rasMat <- t(seu_Cancer_Cell_remake[["AUCell"]]@data)
