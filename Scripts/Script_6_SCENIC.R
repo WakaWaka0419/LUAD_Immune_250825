@@ -52,12 +52,8 @@ rm(loom)
 gc()
 
 ###检查文件是否存在###
-# 定义路径（和你bash一致）
 data_path <- file.path(getwd(), "Output", "Script_6", "DATA")
 db_path   <- file.path(getwd(), "Input", "Analysis_data", "cisTarget_db")
-# 检查目录是否存在
-dir.exists(data_path)
-dir.exists(db_path)
 # 输入文件
 file.exists(file.path(data_path, "00-2.mc_mat_for_step1.loom"))
 # TF 文件
