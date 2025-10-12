@@ -15,7 +15,6 @@ f_motif_path=motifs-v10nr_clust-nr.hgnc-m0.001-o0.0.tbl
 f_db_500bp=hg38_500bp_up_100bp_down_full_tx_v10_clust.genes_vs_motifs.rankings.feather
 f_db_10kb=hg38_10kbp_up_10kbp_down_full_tx_v10_clust.genes_vs_motifs.rankings.feather
 #### 1. build GRN
-## ~17.5 mins
 time singularity run --bind $data_path:/data,$db_path:/cisdb \
 ~/Working_folder/Learn_for_Bioinfo/Learn_for_single_cell/GRN_pro/aertslab-pyscenic-0.9.18.sif \
 pyscenic grn \
@@ -27,7 +26,6 @@ pyscenic grn \
 /cisdb/$f_tfs
 
 #### 2. cisTarget
-## ~30 mins 内存占用小
 time singularity run --bind $data_path:/data,$db_path:/cisdb \
 ~/Working_folder/Learn_for_Bioinfo/Learn_for_single_cell/GRN_pro/aertslab-pyscenic-0.12.1.sif \
 pyscenic ctx \
