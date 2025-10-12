@@ -213,7 +213,6 @@ Figrue_4A <- ggplot(plot.data.4A, aes(Cluster, Description)) +
 Figrue_4A
 #dev.off()
 ###B Compare Cluster Function GSVA###
-#处理原则 ：每个Geneset 不应该出现重复的基因 
 hallmarks.data <- read.gmt("./Input/Analysis_data/h.all.v2025.1.Hs.symbols.gmt")
 KEGG.data <- read.gmt("./Input/Analysis_data/c2.cp.kegg_medicus.v2025.1.Hs.symbols.gmt")
 GO_BP.data <- read.gmt("./Input/Analysis_data/c5.go.bp.v2025.1.Hs.symbols.gmt")
