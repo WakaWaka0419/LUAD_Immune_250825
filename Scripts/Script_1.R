@@ -162,7 +162,6 @@ n <- nrow(plot.data.1B)
 mat.plot.data.1B <- matrix(0, nrow = 1, ncol = n)
 rownames(mat.plot.data.1B) <- "gene"
 
-# 给列名：优先用行名；没有的话用 ID；再没有就用 S1..Sn
 if (!is.null(rownames(plot.data.1B))) {
   colnames(mat.plot.data.1B) <- rownames(plot.data.1B)
 } else if ("ID" %in% colnames(plot.data.1B)) {
@@ -204,11 +203,7 @@ plot.data.1C_Status <- plot.data.1B %>%
   mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
 
 tab <- table(plot.data.1B$Cluster, plot.data.1B$Status)
-chisq.test(tab)   # 卡方检验
-# 或者
-fisher.test(tab) 
-pval <- chisq.test(tab)$p.value
-
+chisq.test(tab)  
 
 Figure_1C_status <- ggplot(plot.data.1C_Status, aes(x = Cluster, y = Percentage, fill = Status)) +
   geom_bar(stat = "identity", position = "stack") +
@@ -241,9 +236,8 @@ tab.dat <- plot.data.1B %>%
   select(Stage, Cluster) %>%
   dplyr::filter(Stage != "Unknown")
 tab <- table(tab.dat$Cluster, tab.dat$Stage)
-chisq.test(tab)   # 卡方检验
-# 或者
-pval <- chisq.test(tab)$p.value
+chisq.test(tab) 
+
 
 
 Figure.1C_Stage  <- ggplot(plot.data.1C_Stage, aes(x = Cluster, y = Percentage, fill = Stage)) +
@@ -281,8 +275,7 @@ tab.dat <- plot.data.1B %>%
   select(T_Stage, Cluster) %>%
   dplyr::filter(T_Stage != "Unknown")
 tab <- table(plot.data.1B$Cluster, plot.data.1B$T_Stage)
-chisq.test(tab)   # 卡方检验
-pval <- chisq.test(tab)$p.value
+chisq.test(tab)  
 
 
 Figure.1C_T_Stage  <- ggplot(plot.data.1C_T_Stage, aes(x = Cluster, y = Percentage, fill = T_Stage)) +
@@ -320,8 +313,7 @@ tab.dat <- plot.data.1B %>%
   select(M_Stage, Cluster) %>%
   dplyr::filter(M_Stage != "Unknown")
 tab <- table(plot.data.1B$Cluster, plot.data.1B$M_Stage)
-chisq.test(tab)   # 卡方检验
-pval <- chisq.test(tab)$p.value
+chisq.test(tab)  
 
 
 Figure.1C_M_Stage  <- ggplot(plot.data.1C_M_Stage, aes(x = Cluster, y = Percentage, fill = M_Stage)) +
@@ -358,8 +350,7 @@ tab.dat <- plot.data.1B %>%
   select(N_Stage, Cluster) %>%
   dplyr::filter(N_Stage != "Unknown") 
 tab <- table(plot.data.1B$Cluster, plot.data.1B$N_Stage)
-chisq.test(tab)   # 卡方检验
-pval <- chisq.test(tab)$p.value
+chisq.test(tab)  
 
 
 Figure.1C_N_Stage  <- ggplot(plot.data.1C_N_Stage, aes(x = Cluster, y = Percentage, fill = N_Stage)) +
