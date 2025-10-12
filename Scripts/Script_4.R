@@ -137,8 +137,8 @@ Combine_DEG <- Combine_DEG %>%
 CompareCluster.res <- compareCluster(
   ENTREZID ~ group,
   data = Combine_DEG,
-  fun = enrichGO,              # no quotes here
-  OrgDb = org.Hs.eg.db,        # correct argument name
+  fun = enrichGO,              
+  OrgDb = org.Hs.eg.db,        
   ont = "BP",
   pvalueCutoff = 0.05
 )
@@ -177,7 +177,6 @@ plot.data.4A <- CompareCluster.sim@compareClusterResult %>%
       ))
   )  %>%
   mutate(
-    # 用 strsplit 分割成两部分，取分子和分母
     GeneRatio_num = sapply(strsplit(GeneRatio, "/"), function(x) as.numeric(x[1]) / as.numeric(x[2]))
   ) %>%
   group_by(Cluster) %>%
