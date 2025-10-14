@@ -1,527 +1,503 @@
-#####01 Loading Packages#####
-Sys.setenv(LANG = 'EN')
+##### 01) Setup & Packages #####
+Sys.setenv(LANG = "EN")
+options(stringsAsFactors = FALSE, encoding = "UTF-8")
 library(tidyverse)
-library(tibble)
-library(ConsensusClusterPlus)
-library(pheatmap)
-library(dendsort)
-library(ggplot2)
-library(ggsci)
-library(scales)
-library(ComplexHeatmap)
+library(data.table)
 library(survival)
 library(survminer)
-library(circlize)
 library(ggplot2)
-library(ggsignif) 
-library(gghalves) 
-library(tidyverse)
-library(factoextra)
-library(ggConvexHull)
-library(plotrix)
 library(ggpubr)
-library(ComplexHeatmap)
-library(grid)
-library(gridExtra)
+library(ggsignif)
+library(gghalves)
 library(ggpp)
 library(patchwork)
+library(plotrix)
+library(grid)
+library(gridExtra)
+library(ComplexHeatmap)
+library(circlize)
+library(factoextra)
+library(ggConvexHull)
 library(IOBR)
 library(TMEscore)
 library(ImmuneSubtypeClassifier)
-source("./R/standarize_fun.R")
-use_color <- c("#2EC4B6","#BDD5EA","#FFA5AB")
 
-#####02 Prepare data#####
-load("./Input/TCGA-LUAD/TCGA-LUAD_mrna_expr_tpm.rdata")
-LUAD.TPM <- {
-  x <- mrna_expr_tpm[, substr(colnames(mrna_expr_tpm),14,15) != "11", drop = FALSE]
+source("./R/standarize_fun.R")
+
+##### 02) Constants #####
+INPUT_DIR          <- "input/tcga_luad"
+OUTPUT_FIG_DIR     <- "output/figures/fig1"
+OUTPUT_RDS_DIR     <- "output/rds"
+PALETTE_CLUSTER3   <- c("#2EC4B6","#BDD5EA","#FFA5AB")
+IMMUNE_SUBTYPE_MIN_SCORE <- 0.6
+
+dir.create(OUTPUT_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(OUTPUT_RDS_DIR, recursive = TRUE, showWarnings = FALSE)
+
+clusterDisplayLabels <- c(
+  WoundHealing = "Wound Healing",
+  IFNGDominant = "IFN-γ Dominant",
+  Inflammatory = "Inflammatory"
+)
+
+##### 03) Load & Prepare Data #####
+load(file.path(INPUT_DIR, "TCGA-LUAD_mrna_expr_tpm.rdata"))   # provides mrna_expr_tpm
+
+luadTpm <- {
+  x <- mrna_expr_tpm[, substr(colnames(mrna_expr_tpm), 14, 15) != "11", drop = FALSE]
   colnames(x) <- substr(colnames(x), 1, 16)
   x[, !duplicated(colnames(x)), drop = FALSE]
 }
-duplicated(colnames(LUAD.TPM))
-LUAD.Survival <- data.table::fread("./Input/TCGA-LUAD/TCGA-LUAD.survival.tsv")
-LUAD.Clinical <- data.table::fread("./Input/TCGA-LUAD/TCGA-LUAD.clinical.tsv") %>%
-  dplyr::filter(tissue_type.samples == "Tumor")
-LUAD.TPM <- log(LUAD.TPM + 1)
-ImmuneSubtypeClass <- ImmuneSubtypeClassifier::callEnsemble(X = LUAD.TPM, geneids = 'symbol')
-calls <- geneMatchErrorReport(X =LUAD.TPM, geneid='symbol')
-match_calls <- geneMatch(X =LUAD.TPM, geneid='symbol')
-colnames(ImmuneSubtypeClass)[1:2] <- c("ID","Cluster")
-colnames(ImmuneSubtypeClass)[3:5] <- c("Wound Healing","IFN-γ Dominant","Inflammatory")
-ImmuneSubtypeClass <- dplyr::filter(ImmuneSubtypeClass,Cluster %in% c("1","2","3")) %>%
-  mutate(Cluster = factor(case_when(
-    Cluster == "1" ~ "Wound Healing",
-    Cluster == "2" ~ "IFN-γ Dominant",
-    Cluster == "3" ~ "Inflammatory",
-    is.na(Cluster) ~ "not reported"
-  ),levels = c("Wound Healing","IFN-γ Dominant","Inflammatory"))
-  ) %>%
-  mutate(Max_Score = apply(select_if(., is.numeric), 1, max, na.rm = TRUE)) %>%
-  filter(Max_Score > 0.6)
+# log1p
+luadTpm <- log(luadTpm + 1)
 
-######Figure 1A 分类饼状图 AND PCA#####
-plot.data.1A_b <- c(round(sum(ImmuneSubtypeClass$Cluster == "Wound Healing")/nrow(ImmuneSubtypeClass),2),
-                    round(sum(ImmuneSubtypeClass$Cluster == "IFN-γ Dominant")/nrow(ImmuneSubtypeClass),2),
-                    round(sum(ImmuneSubtypeClass$Cluster == "Inflammatory")/nrow(ImmuneSubtypeClass),2))
-labels <- c(
-  paste0(
-    "Wound Healing: ", round(sum(ImmuneSubtypeClass$Cluster == "Wound Healing")/nrow(ImmuneSubtypeClass)*100, 2), "%", 
-    "\n(", sum(ImmuneSubtypeClass$Cluster == "Wound Healing"), ")"
-  ),
-  paste0(
-    "IFN-γ Dominant: ", round(sum(ImmuneSubtypeClass$Cluster == "IFN-γ Dominant")/nrow(ImmuneSubtypeClass)*100, 2), "%", 
-    "\n(", sum(ImmuneSubtypeClass$Cluster == "IFN-γ Dominant"), ")"
-  ),
-  paste0(
-    "Inflammatory: ", round(sum(ImmuneSubtypeClass$Cluster == "Inflammatory")/nrow(ImmuneSubtypeClass)*100, 2), "%", 
-    "\n(", sum(ImmuneSubtypeClass$Cluster == "Inflammatory"), ")"
-  )
+luadSurvival <- data.table::fread(file.path(INPUT_DIR, "TCGA-LUAD.survival.tsv"))
+luadClinical <- data.table::fread(file.path(INPUT_DIR, "TCGA-LUAD.clinical.tsv")) |>
+  dplyr::filter(tissue_type.samples == "Tumor")
+
+# Immune subtype calling
+immuneSubtypeAssignments <- ImmuneSubtypeClassifier::callEnsemble(X = luadTpm, geneids = "symbol")
+calls <- geneMatchErrorReport(X = luadTpm, geneid = "symbol")
+match_calls <- geneMatch(X = luadTpm, geneid = "symbol")
+
+# 标准化列名与分群取值（数据层：WoundHealing/IFNGDominant/Inflammatory）
+colnames(immuneSubtypeAssignments)[1:2] <- c("ID", "clusterRaw")
+colnames(immuneSubtypeAssignments)[3:5] <- c("WoundHealing", "IFNGDominant", "Inflammatory")
+
+immuneSubtypeAssignments <- immuneSubtypeAssignments |>
+  dplyr::filter(clusterRaw %in% c("1","2","3")) |>
+  dplyr::mutate(
+    cluster = dplyr::case_when(
+      clusterRaw == "1" ~ "WoundHealing",
+      clusterRaw == "2" ~ "IFNGDominant",
+      clusterRaw == "3" ~ "Inflammatory",
+      .default = NA_character_
+    )
+  ) |>
+  dplyr::mutate(
+    cluster = factor(cluster, levels = c("WoundHealing","IFNGDominant","Inflammatory"))
+  ) |>
+  dplyr::mutate(
+    maxScore = apply(dplyr::select(., WoundHealing, IFNGDominant, Inflammatory), 1, max, na.rm = TRUE)
+  ) |>
+  dplyr::filter(maxScore > IMMUNE_SUBTYPE_MIN_SCORE) |>
+  dplyr::mutate(clusterLabel = clusterDisplayLabels[as.character(cluster)])
+
+##### 04) Figure 1A: Cluster Composition (Pie) #####
+plotData1A <- immuneSubtypeAssignments
+
+fracWH <- round(sum(plotData1A$cluster == "WoundHealing")/nrow(plotData1A), 2)
+fracIF <- round(sum(plotData1A$cluster == "IFNGDominant")/nrow(plotData1A), 2)
+fracIN <- round(sum(plotData1A$cluster == "Inflammatory")/nrow(plotData1A), 2)
+
+labels1A <- c(
+  paste0("Wound Healing: ", round(fracWH*100,2), "%\n(", sum(plotData1A$cluster=="WoundHealing"), ")"),
+  paste0("IFN-γ Dominant: ", round(fracIF*100,2), "%\n(", sum(plotData1A$cluster=="IFNGDominant"), ")"),
+  paste0("Inflammatory: ", round(fracIN*100,2), "%\n(", sum(plotData1A$cluster=="Inflammatory"), ")")
 )
 
-Figure1A <- pie3D(plot.data.1A_b, labels = labels, explode = 0.1, col = use_color, theta = 1.2,radius=0.9)
+fig1AClusterPie <- pie3D(
+  c(fracWH, fracIF, fracIN),
+  labels = labels1A, explode = 0.1, col = PALETTE_CLUSTER3, theta = 1.2, radius = 0.9
+)
 
-#####Figrue 1B Heatmap for Clinical Characters#####
-plot.data.1B <- LUAD.Clinical %>%
-  dplyr::filter(tissue_type.samples == "Tumor") %>%
-  dplyr::select("sample","vital_status.demographic","ajcc_pathologic_stage.diagnoses",
-                "ajcc_pathologic_t.diagnoses","ajcc_pathologic_n.diagnoses","ajcc_pathologic_m.diagnoses") %>%
-  setNames(c("ID","Status","Stage","T_Stage","N_Stage","M_Stage")) %>%
-  dplyr::mutate(Stage = case_when(
-    Stage %in% "Stage I" ~ "Stage I",
-    Stage %in% "Stage IA" ~ "Stage I",
-    Stage %in% "Stage IB" ~ "Stage I",
-    Stage %in% "Stage II" ~ "Stage II",
-    Stage %in% "Stage IIA " ~ "Stage II",
-    Stage %in% "Stage IIB" ~ "Stage II",
-    Stage %in% "Stage IIIA" ~ "Stage III",
-    Stage %in% "Stage IIIB" ~ "Stage III",
-    Stage %in% "Stage IV" ~ "Stage IV",
-    is.na(Stage) ~ "not reported")) %>%
-  dplyr::mutate(T_Stage = case_when(
-    T_Stage %in% "T1" ~ "T1",
-    T_Stage %in% "T1a" ~ "T1",
-    T_Stage %in% "T1b" ~ "T1",
-    T_Stage %in% "T2" ~ "T2",
-    T_Stage %in% "T2a" ~ "T2",
-    T_Stage %in% "T2b" ~ "T2",
-    T_Stage %in% "T3" ~ "T3",
-    T_Stage %in% "T3a" ~ "T3",
-    T_Stage %in% "T3b" ~ "T3",
-    T_Stage %in% "T3c" ~ "T3",
-    T_Stage %in% "T4" ~ "T4",
-    is.na(T_Stage) ~ "not reported"))  %>%
-  dplyr::mutate(M_Stage = case_when(
-    M_Stage %in% "M0" ~ "M0",
-    M_Stage %in% "M1" ~ "M1",
-    M_Stage %in% "M1a" ~ "M1",
-    M_Stage %in% "M1b" ~ "M1",
-    M_Stage %in% "MX" ~ "MX",
-    is.na(M_Stage) ~ "not reported")) %>%
-  right_join(
-    ImmuneSubtypeClass %>% as.data.frame(),
+##### 05) Figure 1B: Clinical Heatmap (Annotation) #####
+dfClinicalAnno <- luadClinical |>
+  dplyr::filter(tissue_type.samples == "Tumor") |>
+  dplyr::select(
+    sample,
+    status = vital_status.demographic,
+    stage = ajcc_pathologic_stage.diagnoses,
+    tStage = ajcc_pathologic_t.diagnoses,
+    nStage = ajcc_pathologic_n.diagnoses,
+    mStage = ajcc_pathologic_m.diagnoses
+  ) |>
+  dplyr::rename(ID = sample) |>
+  dplyr::mutate(
+    stage = dplyr::case_when(
+      stage %in% c("Stage I","Stage IA","Stage IB") ~ "Stage I",
+      stage %in% c("Stage II","Stage IIA","Stage IIB") ~ "Stage II",
+      stage %in% c("Stage IIIA","Stage IIIB") ~ "Stage III",
+      stage %in% c("Stage IV") ~ "Stage IV",
+      .default = "Unknown"
+    ),
+    tStage = dplyr::case_when(
+      tStage %in% c("T1","T1a","T1b") ~ "T1",
+      tStage %in% c("T2","T2a","T2b") ~ "T2",
+      tStage %in% c("T3","T3a","T3b","T3c") ~ "T3",
+      tStage %in% c("T4") ~ "T4",
+      .default = "Unknown"
+    ),
+    mStage = dplyr::case_when(
+      mStage %in% c("M0") ~ "M0",
+      mStage %in% c("M1","M1a","M1b") ~ "M1",
+      mStage %in% c("MX") ~ "MX",
+      .default = "Unknown"
+    )
+  ) |>
+  dplyr::right_join(
+    immuneSubtypeAssignments |>
+      dplyr::select(ID, cluster, clusterLabel),
     by = "ID"
-  ) %>%
-  column_to_rownames(var = "ID") %>%
-  mutate(across(everything(), ~ replace_na(as.character(.x), "Unknown")))
+  ) |>
+  tibble::column_to_rownames(var = "ID") |>
+  dplyr::mutate(across(everything(), ~ replace_na(as.character(.x), "Unknown")))
+
+# Annotation
 columnAnno <- HeatmapAnnotation(
-  Cluster = plot.data.1B$Cluster,
-  Status = plot.data.1B$Status,
-  Stage = plot.data.1B$Stage,
-  T_Stage = plot.data.1B$T_Stage,
-  M_Stage = plot.data.1B$M_Stage,
-  N_Stage = plot.data.1B$N_Stage,
+  Cluster  = dfClinicalAnno$clusterLabel,
+  Status   = dfClinicalAnno$status,
+  Stage    = dfClinicalAnno$stage,
+  T_Stage  = dfClinicalAnno$tStage,
+  M_Stage  = dfClinicalAnno$mStage,
+  N_Stage  = dfClinicalAnno$nStage,
   col = list(
     Cluster = c("Wound Healing" = "#2EC4B6","IFN-γ Dominant"="#BDD5EA","Inflammatory" = "#FFA5AB"),
-    Status = c("Alive"  = "#A8817A",
-               "Dead"    = "#E8BE74"),
-    Stage  = c("Stage I" = "#8ab1d2",
-               "Stage II"   = "#E58579",
-               "Stage III"   = "#D9BDD8",
-               "Stage IV"   = "#9180AC",
-               "Unknown" = "#999999"),
-    T_Stage = c("T1" = "#FF9F1C",
-                "T2" = "#FFA5AB",
-                "T3" = "#023E8A",
-                "T4" = "#9D4EDD",
-                "Unknown" = "#999999"),
-    N_Stage = c("N0" = "#E64B35FF",
-                "N1" = "#4DBBD5FF",
-                "N2" = "#00A087FF",
-                "N3" = "#8491B4FF",
-                "NX" = "#3C5488FF",
-                "Unknown" = "#999999"),
-    M_Stage = c("M0" = "#8491B4FF",
-                "M1" = "#91D1C2FF",
-                "MX" = "#DC0000FF",
-                "Unknown" = "#999999")
+    Status  = c("Alive"="#A8817A","Dead"="#E8BE74","Unknown"="#999999"),
+    Stage   = c("Stage I"="#8ab1d2","Stage II"="#E58579","Stage III"="#D9BDD8","Stage IV"="#9180AC","Unknown"="#999999"),
+    T_Stage = c("T1"="#FF9F1C","T2"="#FFA5AB","T3"="#023E8A","T4"="#9D4EDD","Unknown"="#999999"),
+    N_Stage = c("N0"="#E64B35FF","N1"="#4DBBD5FF","N2"="#00A087FF","N3"="#8491B4FF","NX"="#3C5488FF","Unknown"="#999999"),
+    M_Stage = c("M0"="#8491B4FF","M1"="#91D1C2FF","MX"="#DC0000FF","Unknown"="#999999")
   )
-  
 )
 
-n <- nrow(plot.data.1B)
-mat.plot.data.1B <- matrix(0, nrow = 1, ncol = n)
-rownames(mat.plot.data.1B) <- "gene"
+nCols <- nrow(dfClinicalAnno)
+mat1bPlaceholder <- matrix(0, nrow = 1, ncol = nCols)
+rownames(mat1bPlaceholder) <- "gene"
+colnames(mat1bPlaceholder) <- rownames(dfClinicalAnno)
 
-if (!is.null(rownames(plot.data.1B))) {
-  colnames(mat.plot.data.1B) <- rownames(plot.data.1B)
-} else if ("ID" %in% colnames(plot.data.1B)) {
-  colnames(mat.plot.data.1B) <- plot.data.1B$ID
-} else {
-  colnames(mat.plot.data.1B) <- paste0("S", seq_len(n))
-}
-split <- factor(plot.data.1B$Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory"))
-ord   <- c(which(plot.data.1B$Cluster == "Wound Healing"),
-           which(plot.data.1B$Cluster == "IFN-γ Dominant"),
-           which(plot.data.1B$Cluster == "Inflammatory"))
-Figure_1B <- ComplexHeatmap::Heatmap(
-  mat.plot.data.1B,
+colSplitByCluster <- factor(dfClinicalAnno$clusterLabel, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory"))
+colOrderByCluster <- c(
+  which(dfClinicalAnno$clusterLabel == "Wound Healing"),
+  which(dfClinicalAnno$clusterLabel == "IFN-γ Dominant"),
+  which(dfClinicalAnno$clusterLabel == "Inflammatory")
+)
+
+fig1BClinicalHeatmap <- ComplexHeatmap::Heatmap(
+  mat1bPlaceholder,
   col = c("0" = "white"),
   name = NULL,
   na_col = "white",
   show_column_names = FALSE,
   show_row_names = FALSE,
   row_names_side = "left",
-  column_split = split,
-  column_order = ord,
-  cluster_columns = FALSE,     
+  column_split = colSplitByCluster,
+  column_order = colOrderByCluster,
+  cluster_columns = FALSE,
   cluster_column_slices = FALSE,
   gap = unit(2, "mm"),
   top_annotation = columnAnno,
   height = unit(0.1, "mm"),
-  border = FALSE              
+  border = FALSE
 )
 
+##### 06) Figure 1C: Clinical Composition Comparisons #####
+# Status
+df1cStatus <- dfClinicalAnno |>
+  dplyr::select(status, clusterLabel) |>
+  dplyr::rename(Status = status, Cluster = clusterLabel) |>
+  dplyr::group_by(Cluster, Status) |>
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") |>
+  dplyr::group_by(Cluster) |>
+  dplyr::mutate(Percentage = Count / sum(Count) * 100) |>
+  dplyr::mutate(Cluster = factor(Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+xtabStatus <- table(dfClinicalAnno$clusterLabel, dfClinicalAnno$status)
+pvalStatus <- suppressWarnings(chisq.test(xtabStatus)$p.value)
 
-
-###Figure 1C Character Compare###
-plot.data.1C_Status <- plot.data.1B %>%
-  select(Status, Cluster) %>%
-  group_by(Cluster, Status) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  group_by(Cluster) %>%
-  mutate(Percentage = Count / sum(Count) * 100) %>%
-  mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
-
-tab <- table(plot.data.1B$Cluster, plot.data.1B$Status)
-chisq.test(tab)  
-
-Figure_1C_status <- ggplot(plot.data.1C_Status, aes(x = Cluster, y = Percentage, fill = Status)) +
+fig1CStatus <- ggplot(df1cStatus, aes(x = Cluster, y = Percentage, fill = Status)) +
   geom_bar(stat = "identity", position = "stack") +
   geom_text(aes(label = paste0(round(Percentage, 1), "%")),
-            position = position_stack(vjust = 0.5),  
+            position = position_stack(vjust = 0.5),
             color = "black", size = 4) +
-  scale_fill_manual(values = c("Alive"= "#E64B35CC", "Dead"= "#4DBBD5CC")) +
-  labs(x = "", y = "Percentage (%)", fill = "Status") +
+  scale_fill_manual(values = c("Alive"= "#E64B35CC", "Dead"= "#4DBBD5CC", "Unknown"="#999999")) +
+  labs(x = NULL, y = "Percentage (%)", fill = "Status") +
   theme_bw(base_size = 14) +
   theme(
-    axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1),
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
     axis.text.y  = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold",size = 13)
+    axis.title.y = element_text(face = "bold", size = 13)
   ) +
-  annotate("text", x = 2, y = 105, 
-           label = paste0("italic(P) == ", signif(pval, 3)),
-           parse = TRUE,  
-           face = "bold",
-           fontface = "italic",size = 5)
-##Stage##
-plot.data.1C_Stage <- plot.data.1B %>%
-  select(Stage, Cluster) %>%
-  dplyr::filter(Stage != "Unknown") %>%
-  group_by(Cluster, Stage) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  group_by(Cluster) %>%
-  mutate(Percentage = Count / sum(Count) * 100) %>%
-  mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
-tab.dat <- plot.data.1B %>%
-  select(Stage, Cluster) %>%
-  dplyr::filter(Stage != "Unknown")
-tab <- table(tab.dat$Cluster, tab.dat$Stage)
-chisq.test(tab) 
+  annotate("text", x = 2, y = 105,
+           label = paste0("italic(P) == ", signif(pvalStatus, 3)),
+           parse = TRUE, fontface = "italic", size = 5)
 
+# Stage
+df1cStage <- dfClinicalAnno |>
+  dplyr::select(stage, clusterLabel) |>
+  dplyr::filter(stage != "Unknown") |>
+  dplyr::rename(Stage = stage, Cluster = clusterLabel) |>
+  dplyr::group_by(Cluster, Stage) |>
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") |>
+  dplyr::group_by(Cluster) |>
+  dplyr::mutate(Percentage = Count / sum(Count) * 100) |>
+  dplyr::mutate(Cluster = factor(Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+xtabStage <- with(dfClinicalAnno |> dplyr::filter(stage != "Unknown"),
+                  table(clusterLabel, stage))
+pvalStage <- suppressWarnings(chisq.test(xtabStage)$p.value)
 
-
-Figure.1C_Stage  <- ggplot(plot.data.1C_Stage, aes(x = Cluster, y = Percentage, fill = Stage)) +
+fig1CStage <- ggplot(df1cStage, aes(x = Cluster, y = Percentage, fill = Stage)) +
   geom_bar(stat = "identity", position = "stack") +
   geom_text(aes(label = paste0(round(Percentage, 1), "%")),
-            position = position_stack(vjust = 0.5),  
+            position = position_stack(vjust = 0.5),
             color = "black", size = 4) +
-  scale_fill_manual(values = c("Stage I"= "#E64B35CC", "Stage II"= "#4DBBD5CC",
-                               "Stage III" = "#00A087CC","Stage IV" = "#3C5488CC"
-  )) +
-  labs(x = "", y = "Percentage (%)", fill = "Stage") +
+  scale_fill_manual(values = c("Stage I"="#E64B35CC","Stage II"="#4DBBD5CC","Stage III"="#00A087CC","Stage IV"="#3C5488CC")) +
+  labs(x = NULL, y = "Percentage (%)", fill = "Stage") +
   theme_bw(base_size = 14) +
   theme(
-    axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1),
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
     axis.text.y  = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold",size = 13)
+    axis.title.y = element_text(face = "bold", size = 13)
   ) +
-  annotate("text", x = 2, y = 105, 
-           label = paste0("italic(P) == ", signif(pval, 3)),
-           parse = TRUE,  
-           face = "bold",
-           fontface = "italic",size = 5)
+  annotate("text", x = 2, y = 105,
+           label = paste0("italic(P) == ", signif(pvalStage, 3)),
+           parse = TRUE, fontface = "italic", size = 5)
 
+# T Stage
+df1cTStage <- dfClinicalAnno |>
+  dplyr::select(tStage, clusterLabel) |>
+  dplyr::filter(tStage != "Unknown") |>
+  dplyr::rename(T_Stage = tStage, Cluster = clusterLabel) |>
+  dplyr::group_by(Cluster, T_Stage) |>
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") |>
+  dplyr::group_by(Cluster) |>
+  dplyr::mutate(Percentage = Count / sum(Count) * 100) |>
+  dplyr::mutate(Cluster = factor(Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+xtabTStage <- with(dfClinicalAnno |> dplyr::filter(tStage != "Unknown"),
+                   table(clusterLabel, tStage))
+pvalTStage <- suppressWarnings(chisq.test(xtabTStage)$p.value)
 
-##T_Stage##
-plot.data.1C_T_Stage <- plot.data.1B %>%
-  select(T_Stage, Cluster) %>%
-  dplyr::filter(T_Stage != "Unknown") %>%
-  group_by(Cluster, T_Stage) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  group_by(Cluster) %>%
-  mutate(Percentage = Count / sum(Count) * 100) %>%
-  mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
-tab.dat <- plot.data.1B %>%
-  select(T_Stage, Cluster) %>%
-  dplyr::filter(T_Stage != "Unknown")
-tab <- table(plot.data.1B$Cluster, plot.data.1B$T_Stage)
-chisq.test(tab)  
-
-
-Figure.1C_T_Stage  <- ggplot(plot.data.1C_T_Stage, aes(x = Cluster, y = Percentage, fill = T_Stage)) +
+fig1CTStage <- ggplot(df1cTStage, aes(x = Cluster, y = Percentage, fill = T_Stage)) +
   geom_bar(stat = "identity", position = "stack") +
   geom_text(aes(label = paste0(round(Percentage, 1), "%")),
-            position = position_stack(vjust = 0.5),  
+            position = position_stack(vjust = 0.5),
             color = "black", size = 4) +
-  scale_fill_manual(values = c("T1"= "#E64B35CC", "T2"= "#4DBBD5CC",
-                               "T3" = "#00A087CC","T4" = "#3C5488CC"
-  )) +
-  labs(x = "", y = "Percentage (%)", fill = "T_Stage") +
+  scale_fill_manual(values = c("T1"="#E64B35CC","T2"="#4DBBD5CC","T3"="#00A087CC","T4"="#3C5488CC")) +
+  labs(x = NULL, y = "Percentage (%)", fill = "T_Stage") +
   theme_bw(base_size = 14) +
   theme(
-    axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1),
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
     axis.text.y  = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold",size = 13)
+    axis.title.y = element_text(face = "bold", size = 13)
   ) +
-  annotate("text", x = 2, y = 105, 
-           label = paste0("italic(P) == ", signif(pval, 3)),
-           parse = TRUE,  
-           face = "bold",
-           fontface = "italic",size = 5)
+  annotate("text", x = 2, y = 105,
+           label = paste0("italic(P) == ", signif(pvalTStage, 3)),
+           parse = TRUE, fontface = "italic", size = 5)
 
+# M Stage
+df1cMStage <- dfClinicalAnno |>
+  dplyr::select(mStage, clusterLabel) |>
+  dplyr::filter(mStage != "Unknown") |>
+  dplyr::rename(M_Stage = mStage, Cluster = clusterLabel) |>
+  dplyr::group_by(Cluster, M_Stage) |>
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") |>
+  dplyr::group_by(Cluster) |>
+  dplyr::mutate(Percentage = Count / sum(Count) * 100) |>
+  dplyr::mutate(Cluster = factor(Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+xtabMStage <- with(dfClinicalAnno |> dplyr::filter(mStage != "Unknown"),
+                   table(clusterLabel, mStage))
+pvalMStage <- suppressWarnings(chisq.test(xtabMStage)$p.value)
 
-##M_Stage##
-plot.data.1C_M_Stage <- plot.data.1B %>%
-  select(M_Stage, Cluster) %>%
-  dplyr::filter(M_Stage != "Unknown") %>%
-  group_by(Cluster, M_Stage) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  group_by(Cluster) %>%
-  mutate(Percentage = Count / sum(Count) * 100) %>%
-  mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
-tab.dat <- plot.data.1B %>%
-  select(M_Stage, Cluster) %>%
-  dplyr::filter(M_Stage != "Unknown")
-tab <- table(plot.data.1B$Cluster, plot.data.1B$M_Stage)
-chisq.test(tab)  
-
-
-Figure.1C_M_Stage  <- ggplot(plot.data.1C_M_Stage, aes(x = Cluster, y = Percentage, fill = M_Stage)) +
+fig1CMStage <- ggplot(df1cMStage, aes(x = Cluster, y = Percentage, fill = M_Stage)) +
   geom_bar(stat = "identity", position = "stack") +
   geom_text(aes(label = paste0(round(Percentage, 1), "%")),
-            position = position_stack(vjust = 0.5),  
+            position = position_stack(vjust = 0.5),
             color = "black", size = 4) +
-  scale_fill_manual(values = c("M0"= "#E64B35CC", "M1"= "#4DBBD5CC",
-                               "MX" = "#00A087CC"
-  )) +
-  labs(x = "", y = "Percentage (%)", fill = "M_Stage") +
+  scale_fill_manual(values = c("M0"="#E64B35CC","M1"="#4DBBD5CC","MX"="#00A087CC")) +
+  labs(x = NULL, y = "Percentage (%)", fill = "M_Stage") +
   theme_bw(base_size = 14) +
   theme(
-    axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1),
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
     axis.text.y  = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold",size = 13)
+    axis.title.y = element_text(face = "bold", size = 13)
   ) +
-  annotate("text", x = 2, y = 105, 
-           label = paste0("italic(P) == ", signif(pval, 3)),
-           parse = TRUE,  
-           face = "bold",
-           fontface = "italic",size = 5)
+  annotate("text", x = 2, y = 105,
+           label = paste0("italic(P) == ", signif(pvalMStage, 3)),
+           parse = TRUE, fontface = "italic", size = 5)
 
-##N_Stage##
-plot.data.1C_N_Stage <- plot.data.1B %>%
-  select(N_Stage, Cluster) %>%
-  dplyr::filter(N_Stage != "Unknown") %>%
-  group_by(Cluster, N_Stage) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  group_by(Cluster) %>%
-  mutate(Percentage = Count / sum(Count) * 100) %>%
-  mutate(Cluster = factor(Cluster,levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
-tab.dat <- plot.data.1B %>%
-  select(N_Stage, Cluster) %>%
-  dplyr::filter(N_Stage != "Unknown") 
-tab <- table(plot.data.1B$Cluster, plot.data.1B$N_Stage)
-chisq.test(tab)  
+# N Stage
+df1cNStage <- dfClinicalAnno |>
+  dplyr::select(nStage, clusterLabel) |>
+  dplyr::filter(nStage != "Unknown") |>
+  dplyr::rename(N_Stage = nStage, Cluster = clusterLabel) |>
+  dplyr::group_by(Cluster, N_Stage) |>
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") |>
+  dplyr::group_by(Cluster) |>
+  dplyr::mutate(Percentage = Count / sum(Count) * 100) |>
+  dplyr::mutate(Cluster = factor(Cluster, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+xtabNStage <- with(dfClinicalAnno |> dplyr::filter(nStage != "Unknown"),
+                   table(clusterLabel, nStage))
+pvalNStage <- suppressWarnings(chisq.test(xtabNStage)$p.value)
 
-
-Figure.1C_N_Stage  <- ggplot(plot.data.1C_N_Stage, aes(x = Cluster, y = Percentage, fill = N_Stage)) +
+fig1CNStage <- ggplot(df1cNStage, aes(x = Cluster, y = Percentage, fill = N_Stage)) +
   geom_bar(stat = "identity", position = "stack") +
   geom_text(aes(label = paste0(round(Percentage, 1), "%")),
-            position = position_stack(vjust = 0.5),  
+            position = position_stack(vjust = 0.5),
             color = "black", size = 4) +
-  scale_fill_manual(values = c("N0"= "#E64B35CC", "N1"= "#4DBBD5CC",
-                               "N2" = "#00A087CC","N3" = "#8491B4FF","NX" = "#3C5488CC"
-  )) +
-  labs(x = "", y = "Percentage (%)", fill = "N_Stage") +
+  scale_fill_manual(values = c("N0"="#E64B35CC","N1"="#4DBBD5CC","N2"="#00A087CC","N3"="#8491B4FF","NX"="#3C5488CC")) +
+  labs(x = NULL, y = "Percentage (%)", fill = "N_Stage") +
   theme_bw(base_size = 14) +
   theme(
-    axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1),
+    axis.text.x  = element_text(face = "bold", angle = 45, hjust = 1),
     axis.text.y  = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold",size = 13)
+    axis.title.y = element_text(face = "bold", size = 13)
   ) +
-  annotate("text", x = 2, y = 105, 
-           label = paste0("italic(P) == ", signif(pval, 3)),
-           parse = TRUE,  
-           face = "bold",
-           fontface = "italic",size = 5)
-layout <- "
+  annotate("text", x = 2, y = 105,
+           label = paste0("italic(P) == ", signif(pvalNStage, 3)),
+           parse = TRUE, fontface = "italic", size = 5)
+
+layout1C <- "
 ABC
 DE.
 "
-Figure_1C_combine <- (
-  Figure.1C_Stage   +  # A
-    Figure.1C_T_Stage +  # B
-    Figure_1C_status  +  # C
-    Figure.1C_M_Stage +  # D
-    Figure.1C_N_Stage    # E
-) + plot_layout(design = layout)
+fig1CComposite <- (
+  fig1CStage +   # A
+  fig1CTStage +  # B
+  fig1CStatus +  # C
+  fig1CMStage +  # D
+  fig1CNStage    # E
+) + plot_layout(design = layout1C)
 
-ggsave("./Output/Script_1/Figure_1/Figure_1C_combine.pdf",Figure_1C_combine,width = 12,height = 9)
-#####Figure 1D TME Score#####
-tmescore <- tmescore(eset   = LUAD.TPM,#expression data
-                     method  ="PCA",#default
-                     classify =F)#if true, survival data must be provided in pdata
-tmescore.dat <- ImmuneSubtypeClass %>%
-  left_join(tmescore,by ="ID")
+ggsave(file.path(OUTPUT_FIG_DIR, "fig1c_composite.pdf"), fig1CComposite, width = 12, height = 9)
 
-Figure1D_TMEscore <- ggplot(tmescore.dat,aes(Cluster,TMEscore,fill= Cluster))+
-  geom_half_violin(position = position_nudge(x=0.25),side = "r",width=0.8,color=NA)+
-  geom_boxplot(width=0.4,size=1.2,outlier.color =NA)+
-  geom_jitter(aes(fill= Cluster),shape=21,size=2.5,width=0.2,alpha = 0.5)+
-  geom_signif(
-    comparisons = list(c("Wound Healing","IFN-γ Dominant"), c("IFN-γ Dominant","Inflammatory"),c("Wound Healing","Inflammatory")),
-    map_signif_level = TRUE, test = t.test, step_increase = 0.08
-  )+
-  theme_bw()+
+##### 07) Figure 1D: TMEscore #####
+tmeScore <- tmescore(eset = luadTpm, method  = "PCA", classify = FALSE)
+tmeScoreDf <- immuneSubtypeAssignments |>
+  dplyr::left_join(tmeScore, by = "ID")
+
+fig1DTmeScore <- ggplot(tmeScoreDf, aes(clusterLabel, TMEscore, fill = clusterLabel)) +
+  geom_half_violin(position = position_nudge(x = 0.25), side = "r", width = 0.8, color = NA) +
+  geom_boxplot(width = 0.4, size = 1.2, outlier.color = NA) +
+  geom_jitter(aes(fill = clusterLabel), shape = 21, size = 2.5, width = 0.2, alpha = 0.5) +
+  geom_signif(comparisons = list(
+                c("Wound Healing","IFN-γ Dominant"),
+                c("IFN-γ Dominant","Inflammatory"),
+                c("Wound Healing","Inflammatory")),
+              map_signif_level = TRUE, test = t.test, step_increase = 0.08) +
+  theme_bw() +
   theme(panel.grid = element_blank(),
         panel.border = element_rect(size = 2),
         axis.text.x = element_text(color = "black", size = 13),
-        axis.text.y = element_text(color = "black",size = 13),
+        axis.text.y = element_text(color = "black", size = 13),
         legend.position = "none",
-        axis.title.y = element_text(size = 15,face = "bold"),
-        axis.ticks = element_line(color="black",linewidth = 1))+
-  labs(x=NULL,y="TMEscore") +
-  scale_fill_manual(values = use_color) +
-  theme(axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1))
-ggsave("./Output/Script_1/Figure_1/Figure1D_TMEscore.pdf",Figure1D_TMEscore,width = 3.5,height = 6)
-#####Figure 1E Surv Diff#####
-Surv_plot.data <- ImmuneSubtypeClass %>%
-  left_join(LUAD.Survival, join_by("ID" == "sample")) %>%
-  filter(OS.time > 30 & OS.time < 3650)
+        axis.title.y = element_text(size = 15, face = "bold"),
+        axis.ticks = element_line(color = "black", linewidth = 1)) +
+  labs(x = NULL, y = "TMEscore") +
+  scale_fill_manual(values = setNames(PALETTE_CLUSTER3, c("Wound Healing","IFN-γ Dominant","Inflammatory"))) +
+  theme(axis.text.x = element_text(face = "bold", angle = 45, hjust = 1))
 
-Surv_object <- Surv(time = Surv_plot.data$OS.time, event = Surv_plot.data$OS)
+ggsave(file.path(OUTPUT_FIG_DIR, "fig1d_tmescore.pdf"), fig1DTmeScore, width = 3.5, height = 6)
 
-fit <- survfit(Surv_object ~ Cluster, data = Surv_plot.data)
-surv.plot <- ggsurvplot(
-  fit, 
-  data = Surv_plot.data, 
-  pval = TRUE,               
-  risk.table = FALSE,         
-  palette = use_color,  
-  legend.title = "Immune Cluster",  
-  legend.labs = c("Wound Healing","IFN-γ Dominant","Inflammatory"),  
-  xlab = "Time (Days)",    
-  ylab = "Overall Survival Probability", 
-  ggtheme = theme_bw()  +
+##### 08) Figure 1E: Survival Difference #####
+survPlotData <- immuneSubtypeAssignments |>
+  dplyr::left_join(luadSurvival, dplyr::join_by("ID" == "sample")) |>
+  dplyr::filter(OS.time > 30 & OS.time < 3650) |>
+  dplyr::mutate(clusterLabel = factor(clusterLabel, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
+
+survObject <- Surv(time = survPlotData$OS.time, event = survPlotData$OS)
+fit <- survfit(survObject ~ clusterLabel, data = survPlotData)
+
+survPlot <- ggsurvplot(
+  fit,
+  data = survPlotData,
+  pval = TRUE,
+  risk.table = FALSE,
+  palette = PALETTE_CLUSTER3,
+  legend.title = "Immune Cluster",
+  legend.labs = c("Wound Healing","IFN-γ Dominant","Inflammatory"),
+  xlab = "Time (Days)",
+  ylab = "Overall Survival Probability",
+  ggtheme = theme_bw() +
     theme(
-      panel.border = element_rect(colour = "black", size = 1.5), 
-      axis.text = element_text(size = 12, color = "black", face = "bold"), 
-      axis.title = element_text(size = 12, color = "black", face = "bold"), 
-      axis.ticks = element_line(size = 1, color = "black"), 
-      legend.text = element_text(size = 12, color = "black", face = "bold"), 
-      legend.title = element_text(size = 14, color = "black", face = "bold") 
+      panel.border = element_rect(colour = "black", size = 1.5),
+      axis.text = element_text(size = 12, color = "black", face = "bold"),
+      axis.title = element_text(size = 12, color = "black", face = "bold"),
+      axis.ticks = element_line(size = 1, color = "black"),
+      legend.text = element_text(size = 12, color = "black", face = "bold"),
+      legend.title = element_text(size = 14, color = "black", face = "bold")
     )
 )
-restest <- pairwise_survdiff(Surv(time = OS.time, event = OS) ~ Cluster,
-                             data = Surv_plot.data)
 
-restest[["p.value"]]
-Surv.diff.p <- as.data.frame(restest[["p.value"]])
-Surv.diff.p <- round(Surv.diff.p,3)
-Surv.diff.p[is.na(Surv.diff.p)] <- '-'
-Surv.diff.p <- rownames_to_column(Surv.diff.p,var = '  ')
-pdf("./Output/Script_1/Figure_1/Figure1E_Surv.pdf",width = 5,height = 5)
-surv.plot
+survDiffPairwise <- pairwise_survdiff(Surv(time = OS.time, event = OS) ~ clusterLabel, data = survPlotData)
+survDiffPvalTable <- as.data.frame(round(survDiffPairwise[["p.value"]], 3))
+survDiffPvalTable[is.na(survDiffPvalTable)] <- "-"
+survDiffPvalTable <- tibble::rownames_to_column(survDiffPvalTable, var = "  ")
+
+pdf(file.path(OUTPUT_FIG_DIR, "fig1e_survival.pdf"), width = 5, height = 5)
+print(survPlot)
 dev.off()
 
-#####Figure 1 FGH Esmatime#####
-TME_estimate <- deconvo_tme(eset = LUAD.TPM, method ="estimate")
-TME_estimate.dat <- ImmuneSubtypeClass %>%
-  left_join(TME_estimate,by ="ID")
+##### 09) Figure 1F-G-H: ESTIMATE Scores #####
+tmeEstimate <- deconvo_tme(eset = luadTpm, method = "estimate")
+tmeEstimateDf <- immuneSubtypeAssignments |>
+  dplyr::left_join(tmeEstimate, by = "ID") |>
+  dplyr::mutate(clusterLabel = factor(clusterLabel, levels = c("Wound Healing","IFN-γ Dominant","Inflammatory")))
 
-Figure1F_ImmuneScore <- ggplot(TME_estimate.dat,aes(Cluster,ImmuneScore_estimate,fill= Cluster))+
-  geom_half_violin(position = position_nudge(x=0.25),side = "r",width=0.8,color=NA)+
-  geom_boxplot(width=0.4,size=1.2,outlier.color =NA)+
-  geom_jitter(aes(fill= Cluster),shape=21,size=2.5,width=0.2,alpha = 0.5)+
-  geom_signif(
-    comparisons = list(c("Wound Healing","IFN-γ Dominant"), c("IFN-γ Dominant","Inflammatory"),c("Wound Healing","Inflammatory")),
-    map_signif_level = TRUE, test = t.test, step_increase = 0.08
-  )+
-  theme_bw()+
+fig1FImmuneScore <- ggplot(tmeEstimateDf, aes(clusterLabel, ImmuneScore_estimate, fill = clusterLabel)) +
+  geom_half_violin(position = position_nudge(x=0.25), side = "r", width=0.8, color=NA) +
+  geom_boxplot(width=0.4, size=1.2, outlier.color = NA) +
+  geom_jitter(aes(fill= clusterLabel), shape=21, size=2.5, width=0.2, alpha = 0.5) +
+  geom_signif(comparisons = list(
+                c("Wound Healing","IFN-γ Dominant"),
+                c("IFN-γ Dominant","Inflammatory"),
+                c("Wound Healing","Inflammatory")),
+              map_signif_level = TRUE, test = t.test, step_increase = 0.08) +
+  theme_bw() +
   theme(panel.grid = element_blank(),
         panel.border = element_rect(size = 2),
         axis.text.x = element_text(color = "black", size = 13),
-        axis.text.y = element_text(color = "black",size = 13),
+        axis.text.y = element_text(color = "black", size = 13),
         legend.position = "none",
-        axis.title.y = element_text(size = 15,face = "bold"),
-        axis.ticks = element_line(color="black",linewidth = 1))+
-  labs(x=NULL,y="Immune Score") +
-  scale_fill_manual(values = use_color) +
-  theme(axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1))
+        axis.title.y = element_text(size = 15, face = "bold"),
+        axis.ticks = element_line(color="black", linewidth = 1)) +
+  labs(x=NULL, y="Immune Score") +
+  scale_fill_manual(values = setNames(PALETTE_CLUSTER3, c("Wound Healing","IFN-γ Dominant","Inflammatory"))) +
+  theme(axis.text.x = element_text(face = "bold", angle = 45, hjust = 1))
 
-Figure1G_StromalScore <- ggplot(TME_estimate.dat,aes(Cluster,StromalScore_estimate,fill= Cluster))+
-  geom_half_violin(position = position_nudge(x=0.25),side = "r",width=0.8,color=NA)+
-  geom_boxplot(width=0.4,size=1.2,outlier.color =NA)+
-  geom_jitter(aes(fill= Cluster),shape=21,size=2.5,width=0.2,alpha = 0.5)+
-  geom_signif(
-    comparisons = list(c("Wound Healing","IFN-γ Dominant"), c("IFN-γ Dominant","Inflammatory"),c("Wound Healing","Inflammatory")),
-    map_signif_level = TRUE, test = t.test, step_increase = 0.08
-  )+
-  theme_bw()+
+fig1GStromalScore <- ggplot(tmeEstimateDf, aes(clusterLabel, StromalScore_estimate, fill = clusterLabel)) +
+  geom_half_violin(position = position_nudge(x=0.25), side = "r", width=0.8, color=NA) +
+  geom_boxplot(width=0.4, size=1.2, outlier.color = NA) +
+  geom_jitter(aes(fill= clusterLabel), shape=21, size=2.5, width=0.2, alpha = 0.5) +
+  geom_signif(comparisons = list(
+                c("Wound Healing","IFN-γ Dominant"),
+                c("IFN-γ Dominant","Inflammatory"),
+                c("Wound Healing","Inflammatory")),
+              map_signif_level = TRUE, test = t.test, step_increase = 0.08) +
+  theme_bw() +
   theme(panel.grid = element_blank(),
         panel.border = element_rect(size = 2),
         axis.text.x = element_text(color = "black", size = 13),
-        axis.text.y = element_text(color = "black",size = 13),
+        axis.text.y = element_text(color = "black", size = 13),
         legend.position = "none",
-        axis.title.y = element_text(size = 15,face = "bold"),
-        axis.ticks = element_line(color="black",linewidth = 1))+
-  labs(x=NULL,y="Stromal Score") +
-  scale_fill_manual(values = use_color) +
-  theme(axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1))
+        axis.title.y = element_text(size = 15, face = "bold"),
+        axis.ticks = element_line(color="black", linewidth = 1)) +
+  labs(x=NULL, y="Stromal Score") +
+  scale_fill_manual(values = setNames(PALETTE_CLUSTER3, c("Wound Healing","IFN-γ Dominant","Inflammatory"))) +
+  theme(axis.text.x = element_text(face = "bold", angle = 45, hjust = 1))
 
-Figure1H_TumorPurity <- ggplot(TME_estimate.dat,aes(Cluster,TumorPurity_estimate,fill= Cluster))+
-  geom_half_violin(position = position_nudge(x=0.25),side = "r",width=0.8,color=NA)+
-  geom_boxplot(width=0.4,size=1.2,outlier.color =NA)+
-  geom_jitter(aes(fill= Cluster),shape=21,size=2.5,width=0.2,alpha = 0.5)+
-  geom_signif(
-    comparisons = list(c("Wound Healing","IFN-γ Dominant"), c("IFN-γ Dominant","Inflammatory"),c("Wound Healing","Inflammatory")),
-    map_signif_level = TRUE, test = t.test, step_increase = 0.08
-  )+
-  theme_bw()+
+fig1HTumorPurity <- ggplot(tmeEstimateDf, aes(clusterLabel, TumorPurity_estimate, fill = clusterLabel)) +
+  geom_half_violin(position = position_nudge(x=0.25), side = "r", width=0.8, color=NA) +
+  geom_boxplot(width=0.4, size=1.2, outlier.color = NA) +
+  geom_jitter(aes(fill= clusterLabel), shape=21, size=2.5, width=0.2, alpha = 0.5) +
+  geom_signif(comparisons = list(
+                c("Wound Healing","IFN-γ Dominant"),
+                c("IFN-γ Dominant","Inflammatory"),
+                c("Wound Healing","Inflammatory")),
+              map_signif_level = TRUE, test = t.test, step_increase = 0.08) +
+  theme_bw() +
   theme(panel.grid = element_blank(),
         panel.border = element_rect(size = 2),
         axis.text.x = element_text(color = "black", size = 13),
-        axis.text.y = element_text(color = "black",size = 13),
+        axis.text.y = element_text(color = "black", size = 13),
         legend.position = "none",
-        axis.title.y = element_text(size = 15,face = "bold"),
-        axis.ticks = element_line(color="black",linewidth = 1))+
-  labs(x=NULL,y="TumorPurity Score") +
-  scale_fill_manual(values = use_color) +
-  theme(axis.text.x  = element_text(face = "bold",angle = 45,hjust = 1))
+        axis.title.y = element_text(size = 15, face = "bold"),
+        axis.ticks = element_line(color="black", linewidth = 1)) +
+  labs(x=NULL, y="TumorPurity Score") +
+  scale_fill_manual(values = setNames(PALETTE_CLUSTER3, c("Wound Healing","IFN-γ Dominant","Inflammatory"))) +
+  theme(axis.text.x = element_text(face = "bold", angle = 45, hjust = 1))
 
-Figure_FGH <- Figure1F_ImmuneScore + Figure1G_StromalScore + Figure1H_TumorPurity
+fig1FGHComposite <- fig1FImmuneScore + fig1GStromalScore + fig1HTumorPurity
+ggsave(file.path(OUTPUT_FIG_DIR, "fig1fgh_composite.pdf"), fig1FGHComposite, width = 10.5, height = 6)
 
-ggsave("./Output/Script_1/Figure_1/Figure_FGH.pdf",Figure_FGH,width = 10.5,height = 6)
-
-
-#save.image("./Output/Script_1/RData/Script1_image.Rdata")
-#saveRDS(ImmuneSubtypeClass,"./Output/Script_1/ImmuneSubtypeClass.RDS")
+##### 10) Save objects #####
+# saveRDS(immuneSubtypeAssignments, file.path(OUTPUT_RDS_DIR, "immune_subtypes.rds"))
+# save.image(file.path(OUTPUT_RDS_DIR, "script1_image.Rdata"))
