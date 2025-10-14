@@ -22,8 +22,6 @@ library(IOBR)
 library(TMEscore)
 library(ImmuneSubtypeClassifier)
 
-source("./R/standarize_fun.R")
-
 ##### 02) Constants #####
 INPUT_DIR          <- "input/tcga_luad"
 OUTPUT_FIG_DIR     <- "output/figures/fig1"
