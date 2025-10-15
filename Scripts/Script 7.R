@@ -15,7 +15,7 @@ library(forestplot)
 library(GSVA)
 library(ggcor)
 
-##### 02) Constants (paths, palette, gene) #####
+##### 02) Constants #####
 # Raw data (PanCanAtlas from local paths)
 PAN_ANN_PATH   <- "~/Working_folder/DataBase/Pancanatlas/merged_sample_quality_annotations.tsv"
 PAN_SURV_PATH  <- "~/Working_folder/DataBase/Pancanatlas/Survival_SupplementalTable_S1_20171025_xena_sp.tsv"
@@ -47,8 +47,6 @@ COL_GREEN  <- "#71BC5D"
 COL_CHERRY <- "#E5588C"
 COL_RED    <- "#E46A6B"
 COL_PURPLE <- "#8959A3"
-
-# Gene of interest
 GOI <- "TPX2"
 
 ##### 03) Load Pan-Cancer data & preprocess #####
