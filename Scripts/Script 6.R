@@ -1,5 +1,6 @@
-#####01 Loading Packages#####
-Sys.setenv(LANG = 'EN')
+##### 01) Setup & Packages #####
+Sys.setenv(LANG = "EN")
+options(stringsAsFactors = FALSE, encoding = "UTF-8")
 library(Seurat)
 library(Matrix)
 library(SCP)
@@ -14,84 +15,186 @@ library(dplyr)
 library(tibble)
 library(ggpubr)
 source("./R/standarize_fun.R")
-use_color <- c("#2EC4B6","#BDD5EA","#FFA5AB")
 
-#####02 Main Script#####
-seu <- readRDS("~/Working_folder/DataBase/LUAD/scData/refquery_final.rds")
-meta.data <- seu@meta.data
-table(meta.data$id)
-####Figure 6A####
-#原始注释图#
-Figure_6A <- SCP::CellDimPlot(seu,group.by = "Cell_Cluster_level1",theme_use = "theme_blank")
-dpis_genes <- c("TPX2","CYP4B1","SCGB3A1","CACNA2D2","UBE2C","SFTPB","MYBL2","CDC20","BIRC5","SUSD2")
-Figure_S6 <- FeatureDimPlot(seu,feature = dpis_genes,reduction = "umap",theme_use = "theme_blank")
-#pdf("FigureS6.pdf",width = 12,height = 9)
-#Figure_S6
-#dev.off()
-#创建打分后映射#
-dpis_genes <- c("TPX2","CYP4B1","SCGB3A1","CACNA2D2","UBE2C","SFTPB","MYBL2","CDC20","BIRC5","SUSD2")
+##### 02) Constants (paths, palette) #####
+INPUT_SEURAT_RDS   <- "~/Working_folder/DataBase/LUAD/scData/refquery_final.rds"       # source Seurat object
+OUTPUT_BASE_DIR    <- "output/script6"
+OUTPUT_DATA_DIR    <- file.path(OUTPUT_BASE_DIR, "data")
+OUTPUT_FIG_DIR     <- file.path(OUTPUT_BASE_DIR, "figures")
+
+dir.create(OUTPUT_BASE_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(OUTPUT_DATA_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(OUTPUT_FIG_DIR,  recursive = TRUE, showWarnings = FALSE)
+
+PALETTE_CLUSTER3   <- c("#2EC4B6", "#BDD5EA", "#FFA5AB")
+PALETTE_BIN_2      <- c("#FF7F00", "#1F78B4")  # high / low binary plots
+
+# DPIS panel
+DPIS_GENES <- c("TPX2","CYP4B1","SCGB3A1","CACNA2D2","UBE2C","SFTPB","MYBL2","CDC20","BIRC5","SUSD2")
+
+##### 03) Load #####
+seu <- readRDS(INPUT_SEURAT_RDS)
+meta_df <- seu@meta.data
+print(table(meta_df$id))
+
+##### 04) Figure 6A — baseline annotation UMAP #####
+Figure_6A <- SCP::CellDimPlot(
+  srt       = seu,
+  group.by  = "Cell_Cluster_level1",
+  theme_use = "theme_blank"
+)
+
+##### 05) Supplement S6 — marker features (DPIS panel) #####
+Figure_S6 <- FeatureDimPlot(
+  srt        = seu,
+  feature    = DPIS_GENES,
+  reduction  = "umap",
+  theme_use  = "theme_blank"
+)
+# pdf(file.path(OUTPUT_FIG_DIR, "figure_s6_dpis_feature_umap.pdf"), width = 12, height = 9)
+# Figure_S6
+# dev.off()
+
+##### 06) DPIS module score & grouping #####
+# Seurat::AddModuleScore creates columns DPIS_Score1, DPIS_Score2... here only one set -> "...1"
 seu <- AddModuleScore(
-  seu,
-  features = list(dpis_genes),
-  name = "DPIS" 
+  object   = seu,
+  features = list(DPIS_GENES),
+  name     = "DPIS_Score"
 )
 
-Figure_6B <- FeatureDimPlot(seu,features = "DPIS1",reduction = "umap",theme_use = "theme_blank")
-#分组#
-seu@meta.data$DPIS_group <- ifelse(seu@meta.data$DPIS1 > 0, "DPIS_High","DPIS_LOW")
-Figure_6C <- CellDimPlot(seu,group.by = "DPIS_group",reduction = "umap",theme_use = "theme_blank", palcolor = c("#FF7F00","#1F78B4"))
-Figure_6D <- CellStatPlot(seu, stat.by = "DPIS_group", plot_type = "ring")
-Figure_6E <- CellStatPlot(seu, stat.by = "Cell_Cluster_level1", group.by = "DPIS_group", label = TRUE)
-#pdf("./Output/Script_6/Figure/Figure6ABC.pdf",width = 12,height=4.5)
-#Figure_6A | Figure_6B | Figure_6C
-#dev.off()
-#pdf("./Output/Script_6/Figure/Figure6DE.pdf",width = 8,height=4.5)
-#Figure_6D | Figure_6E
-#dev.off()
-#提取Cancer Cell#
-seu_Cancer_Cell_remake <- subset(seu,Cell_Cluster_level2 %in% c("CDKN2A Cancer","CXCL1 Cancer","LAMC2 Cancer",
-                                                              "Proliferating Cancer","SOX2 Cancer"))
-seu_Cancer_Cell_remake <- seu_Cancer_Cell_remake %>%
-  NormalizeData(.) %>%
-  FindVariableFeatures(.) %>%
-  ScaleData(.) %>%
-  RunPCA(.) %>%
-  RunHarmony(reduction = "pca",group.by.vars = "orig.ident",reduction.save = "harmony") %>%
-  RunUMAP(reduction = "harmony",1:30)
-Figure_6F <- SCP::CellDimPlot(seu_Cancer_Cell_remake,group.by = "Cell_Cluster_level2",theme_use = "theme_blank")
-Figure_6G <- FeatureDimPlot(seu_Cancer_Cell_remake,features = "DPIS1",theme_use = "theme_blank")
+# Harmonize the score column name (Seurat creates "DPIS_Score1")
+seu@meta.data <- seu@meta.data |>
+  dplyr::mutate(DPIS_Score = .data[["DPIS_Score1"]])
+
+Figure_6B <- FeatureDimPlot(
+  srt        = seu,
+  features   = "DPIS_Score1",
+  reduction  = "umap",
+  theme_use  = "theme_blank"
+)
+
+# Binary group by DPIS score > 0
+seu@meta.data <- seu@meta.data |>
+  dplyr::mutate(
+    DPIS_group = ifelse(.data[["DPIS_Score"]] > 0, "DPIS_High", "DPIS_Low")
+  )
+
+Figure_6C <- CellDimPlot(
+  srt        = seu,
+  group.by   = "DPIS_group",
+  reduction  = "umap",
+  theme_use  = "theme_blank",
+  palcolor   = PALETTE_BIN_2
+)
+
+Figure_6D <- CellStatPlot(
+  srt       = seu,
+  stat.by   = "DPIS_group",
+  plot_type = "ring"
+)
+
+Figure_6E <- CellStatPlot(
+  srt      = seu,
+  stat.by  = "Cell_Cluster_level1",
+  group.by = "DPIS_group",
+  label    = TRUE
+)
+
+# pdf(file.path(OUTPUT_FIG_DIR, "figure6_abc.pdf"), width = 12, height = 4.5)
+# Figure_6A | Figure_6B | Figure_6C
+# dev.off()
+# pdf(file.path(OUTPUT_FIG_DIR, "figure6_de.pdf"), width = 8, height = 4.5)
+# Figure_6D | Figure_6E
+# dev.off()
+
+##### 07) Subset: cancer-cell compartment & re-embed #####
+CANCER_L2_LEVELS <- c("CDKN2A Cancer","CXCL1 Cancer","LAMC2 Cancer","Proliferating Cancer","SOX2 Cancer")
+
+seu_cancer <- subset(seu, subset = Cell_Cluster_level2 %in% CANCER_L2_LEVELS) |>
+  NormalizeData() |>
+  FindVariableFeatures() |>
+  ScaleData() |>
+  RunPCA()
+
+# Batch correction & UMAP on Harmony space
+seu_cancer <- RunHarmony(
+  object         = seu_cancer,
+  reduction      = "pca",
+  group.by.vars  = "orig.ident",
+  reduction.save = "harmony"
+)
+seu_cancer <- RunUMAP(
+  object    = seu_cancer,
+  reduction = "harmony",
+  dims      = 1:30
+)
+
+Figure_6F <- SCP::CellDimPlot(
+  srt       = seu_cancer,
+  group.by  = "Cell_Cluster_level2",
+  theme_use = "theme_blank"
+)
+
+Figure_6G <- FeatureDimPlot(
+  srt        = seu_cancer,
+  features   = "DPIS_Score1",
+  theme_use  = "theme_blank"
+)
+
 Figure_6H <- FeatureStatPlot(
-  srt = seu_Cancer_Cell_remake, group.by = "Cell_Cluster_level2", bg.by = "Cell_Cluster_level2",
-  stat.by = c("DPIS1"), add_box = TRUE
+  srt      = seu_cancer,
+  group.by = "Cell_Cluster_level2",
+  bg.by    = "Cell_Cluster_level2",
+  stat.by  = c("DPIS_Score1"),
+  add_box  = TRUE
 )
-#pdf("./Output/Script_6/Figure/Figure6FGH.pdf",width = 12,height=4.5)
-#Figure_6F | Figure_6G | Figure_6H
-#dev.off()
-seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2_orign <- seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2
-seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2 <- ifelse(
-  seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2 == "Proliferating Cancer" &
-    seu_Cancer_Cell_remake@meta.data$DPIS_group == "DPIS_High",
-  "DPIS+ Proliferating Cancer",
-  seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2
+
+# pdf(file.path(OUTPUT_FIG_DIR, "figure6_fgh.pdf"), width = 12, height = 4.5)
+# Figure_6F | Figure_6G | Figure_6H
+# dev.off()
+
+##### 08) Relabeling: proliferating ∩ DPIS_high #####
+# Keep a copy of original level-2 label
+seu_cancer@meta.data <- seu_cancer@meta.data |>
+  dplyr::mutate(Cell_Cluster_level2_orig = .data[["Cell_Cluster_level2"]])
+
+# Create combined label for DPIS+ proliferating cancer cells
+seu_cancer@meta.data <- seu_cancer@meta.data |>
+  dplyr::mutate(
+    Cell_Cluster_level2 = ifelse(
+      .data[["Cell_Cluster_level2"]] == "Proliferating Cancer" & .data[["DPIS_group"]] == "DPIS_High",
+      "DPIS+ Proliferating Cancer",
+      .data[["Cell_Cluster_level2"]]
+    ),
+    Proliferating_Flag = ifelse(.data[["Cell_Cluster_level2_orig"]] == "Proliferating Cancer", "Proliferating Cancer", "Others"),
+    DPIS_Flag          = ifelse(.data[["DPIS_group"]] == "DPIS_High", "DPIS Cells", "Others"),
+    DPIS_Prolif_Flag   = ifelse(.data[["Cell_Cluster_level2"]] == "DPIS+ Proliferating Cancer", "DPIS+ Proliferating Cancer", "Others")
+  )
+
+Figure_6I <- SCP::CellDimPlot(
+  srt       = seu_cancer,
+  group.by  = "Proliferating_Flag",
+  theme_use = "theme_blank",
+  palcolor  = PALETTE_BIN_2
 )
-seu_Cancer_Cell_remake@meta.data$Proliferating <- ifelse(
-  seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2_orign == "Proliferating Cancer",
-  "Proliferating Cancer","Others"
+
+Figure_6J <- SCP::CellDimPlot(
+  srt       = seu_cancer,
+  group.by  = "DPIS_Flag",
+  theme_use = "theme_blank",
+  palcolor  = PALETTE_BIN_2
 )
-seu_Cancer_Cell_remake@meta.data$DPIS <- ifelse(
-  seu_Cancer_Cell_remake@meta.data$DPIS_group == "DPIS_High",
-  "DPIS Cells","Others"
+
+Figure_6K <- SCP::CellDimPlot(
+  srt       = seu_cancer,
+  group.by  = "DPIS_Prolif_Flag",
+  theme_use = "theme_blank",
+  palcolor  = PALETTE_BIN_2
 )
-seu_Cancer_Cell_remake@meta.data$DPIS_Proliferating <- ifelse(
-  seu_Cancer_Cell_remake@meta.data$Cell_Cluster_level2 == "DPIS+ Proliferating Cancer",
-  "DPIS+ Proliferating Cancer","Others"
-)
-Figure_6I <- SCP::CellDimPlot(seu_Cancer_Cell_remake,group.by = "Proliferating",theme_use = "theme_blank",palcolor = c("#FF7F00","#1F78B4"))
-Figure_6J <- SCP::CellDimPlot(seu_Cancer_Cell_remake,group.by = "DPIS",theme_use = "theme_blank",palcolor = c("#FF7F00","#1F78B4"))
-Figure_6K <- SCP::CellDimPlot(seu_Cancer_Cell_remake,group.by = "DPIS_Proliferating",theme_use = "theme_blank",palcolor = c("#FF7F00","#1F78B4"))
-pdf("./Output/Script_6/Figure/Figure6IJK.pdf",width = 12,height=4.5)
-Figure_6I | Figure_6J | Figure_6K
+
+pdf(file.path(OUTPUT_FIG_DIR, "figure6_ijk.pdf"), width = 12, height = 4.5)
+(Figure_6I | Figure_6J | Figure_6K)
 dev.off()
-#saveRDS(seu_Cancer_Cell_remake,"./Output/Script_6/seu_SCENIC.rds")
 
-
+# saveRDS(seu_cancer, file.path(OUTPUT_DATA_DIR, "seu_SCENIC.rds"))
